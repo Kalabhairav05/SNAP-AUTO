@@ -1,0 +1,364 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Driver Dashboard</title>
+  <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;600&display=swap" rel="stylesheet"/>
+  <script src="https://cdn.jsdelivr.net/npm/qrcode/build/qrcode.min.js"></script>
+  <style>
+    body { 
+      font-family: 'Poppins', sans-serif; 
+      display: flex; 
+      flex-direction: column; 
+      align-items: center; 
+      min-height: 100vh; 
+      margin: 0; 
+      background: linear-gradient(to right, #667eea, #764ba2); 
+      color: white; 
+      padding: 20px; 
+      position: relative;
+    }
+    h1 { margin-bottom: 5px; }
+    #greeting { font-size: 18px; margin-bottom: 20px; }
+    button#myRidesBtn {
+      position: fixed;
+      top: 20px;
+      right: 20px;
+      padding: 8px 12px;
+      border-radius: 8px;
+      border: none;
+      background: #764ba2;
+      color: white;
+      cursor: pointer;
+      z-index: 1000;
+    }
+    button#myRidesBtn:hover {
+      opacity: 0.9;
+    }
+    .card { 
+      background: white; 
+      color: #333; 
+      padding: 25px; 
+      border-radius: 20px; 
+      box-shadow: 0 8px 25px rgba(0,0,0,0.1); 
+      width: 90%; 
+      max-width: 500px; 
+      margin-bottom: 20px; 
+    }
+    #myRidesCard {
+      display: none;
+      opacity: 0;
+      transform: translateY(-20px);
+      transition: opacity 0.3s ease, transform 0.3s ease;
+    }
+    #myRidesCard.show {
+      display: block;
+      opacity: 1;
+      transform: translateY(0);
+    }
+    #driverCard { 
+      display: flex; 
+      flex-direction: row; 
+      justify-content: space-between; 
+      align-items: center; 
+      gap: 20px; 
+    }
+    .details { flex: 1; }
+    .detail-item { margin: 8px 0; font-size: 15px; }
+    .label { font-weight: 600; color: #764ba2; }
+    .qr-container { 
+      display: flex; 
+      flex-direction: column; 
+      align-items: center; 
+      min-width: 150px; 
+    }
+    #qrcode { 
+      margin-top: 10px; 
+      border: 2px solid #764ba2; 
+      border-radius: 10px; 
+      padding: 8px; 
+      background: white; 
+    }
+    .note { 
+      font-size: 12px; 
+      margin-top: 5px; 
+      color: #666; 
+      text-align: center; 
+    }
+    button.btn { 
+      margin-top: 8px; 
+      padding: 8px 12px; 
+      border-radius: 8px; 
+      border: none; 
+      background: #764ba2; 
+      color: white; 
+      cursor: pointer; 
+    }
+    button.btn:hover {
+      opacity: 0.9;
+    }
+    button.decline-btn {
+      background: #e74c3c;
+    }
+    button.decline-btn:hover {
+      opacity: 0.9;
+    }
+  </style>
+</head>
+<body>
+  <!-- Header -->
+  <div style="text-align: center;">
+    <h1>🚖 Driver Dashboard</h1>
+    <div id="greeting">Hello, Driver!</div>
+  </div>
+  <button id="myRidesBtn" onclick="toggleMyRides()">My Rides</button>
+
+  <!-- My Rides -->
+  <div class="card" id="myRidesCard">
+    <h3>🛣 My Rides</h3>
+    <div id="myRideList">No rides accepted yet.</div>
+  </div>
+
+  <!-- Driver Info -->
+  <div class="card" id="driverCard">
+    <div class="details" id="driverDetails">Loading...</div>
+    <div class="qr-container">
+      <canvas id="qrcode"></canvas>
+      <p class="note">Students scan this QR</p>
+    </div>
+  </div>
+
+  <!-- Hotspots -->
+  <div class="card" id="hotspotsCard">
+    <h3>📍 Active Hotspots</h3>
+    <div id="hotspotList">Loading...</div>
+  </div>
+
+  <!-- Ride Requests -->
+  <div class="card" id="ridesCard">
+    <h3>🚖 Ride Requests Nearby</h3>
+    <div id="rideList">Loading...</div>
+  </div>
+
+  <script type="module">
+    import { initializeApp } from "https://www.gstatic.com/firebasejs/10.5.0/firebase-app.js";
+    import { getAuth, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.5.0/firebase-auth.js";
+    import { getFirestore, doc, setDoc, getDoc, collection, updateDoc, query, where, onSnapshot, serverTimestamp } from "https://www.gstatic.com/firebasejs/10.5.0/firebase-firestore.js";
+
+    const firebaseConfig = {
+      apiKey: "AIzaSyAHoQR6Y1TZlJROgY63tY_x-qBwEqYFSgU",
+      authDomain: "project-ab4c9.firebaseapp.com",
+      projectId: "project-ab4c9",
+      storageBucket: "project-ab4c9.appspot.com",
+      messagingSenderId: "256359032769",
+      appId: "1:256359032769:web:6e5f8ca8ac38e301c93140"
+    };
+
+    const app = initializeApp(firebaseConfig);
+    const auth = getAuth(app);
+    const db = getFirestore(app);
+
+    let uid = "";
+    const hotspotList = document.getElementById("hotspotList");
+    const rideList = document.getElementById("rideList");
+    const myRidesCard = document.getElementById("myRidesCard");
+    const myRideList = document.getElementById("myRideList");
+    const greeting = document.getElementById("greeting");
+    let myRides = {};
+
+    onAuthStateChanged(auth, async (user) => {
+      if (!user) {
+        alert("Not logged in!");
+        window.location.href = "signin.html";
+        return;
+      }
+      uid = user.uid;
+
+      const driverRef = doc(db, "drivers", uid);
+      const driverSnap = await getDoc(driverRef);
+      let driverData;
+      if (!driverSnap.exists()) {
+        driverData = {
+          name: user.displayName || "Unnamed Driver",
+          phone: user.phoneNumber || "Not Provided",
+          vehicle: "Not Set",
+          license: "Not Set"
+        };
+        await setDoc(driverRef, driverData);
+      } else {
+        driverData = driverSnap.data();
+      }
+
+      greeting.textContent = `Hello, ${driverData.name}!`;
+
+      QRCode.toCanvas(document.getElementById("qrcode"), uid, { width: 140 }, err => { if(err) console.error(err); });
+
+      document.getElementById("driverDetails").innerHTML = `
+        <h3>👤 Your Details</h3>
+        <div class="detail-item"><span class="label">Name:</span> ${driverData.name}</div>
+        <div class="detail-item"><span class="label">Phone:</span> ${driverData.phone}</div>
+        <div class="detail-item"><span class="label">Vehicle:</span> ${driverData.vehicle}</div>
+        <div class="detail-item"><span class="label">License:</span> ${driverData.license}</div>
+      `;
+
+      listenHotspots();
+      listenRideRequests();
+      listenMyRides();
+      startTrackingDriverLocation();
+    });
+
+    function toggleMyRides() {
+      myRidesCard.classList.toggle("show");
+    }
+    window.toggleMyRides = toggleMyRides;
+
+    function renderMyRides() {
+      myRideList.innerHTML = "";
+      const keys = Object.keys(myRides);
+      if(keys.length === 0) {
+        myRideList.innerHTML = "<p>No rides accepted yet.</p>";
+        return;
+      }
+      keys.forEach(id => {
+        const data = myRides[id];
+        const div = document.createElement("div");
+        div.className = "detail-item";
+        div.innerHTML = `
+          <strong>${data.Pickup.name} ➝ ${data.Destination.name}</strong><br>
+          Distance: ${data.Distance.toFixed(2)} km, Fare: ₹${data.Fare}<br>
+          <button class="btn decline-btn" onclick="declineRide('${id}')">Decline Ride</button>
+        `;
+        myRideList.appendChild(div);
+      });
+    }
+
+    function listenHotspots() {
+      const hsCol = collection(db, "Hotspots");
+      onSnapshot(hsCol, snaps => {
+        hotspotList.innerHTML = "";
+        if (snaps.empty) {
+          hotspotList.innerHTML = "<p>No active hotspots right now.</p>";
+          return;
+        }
+        snaps.forEach(hs => {
+          const data = hs.data();
+          if (!data.name) return;
+          const div = document.createElement("div");
+          div.className = "detail-item";
+          div.innerHTML = `📍 ${data.name} - ${data.count || 0} students`;
+          hotspotList.appendChild(div);
+        });
+      });
+    }
+
+    function listenRideRequests() {
+      const ridesQuery = query(collection(db, "Rides"), where("Status", "==", "requested"));
+      onSnapshot(ridesQuery, ridesSnap => {
+        rideList.innerHTML = "";
+        if (ridesSnap.empty) {
+          rideList.innerHTML = "<p>No rides nearby.</p>";
+          return;
+        }
+        ridesSnap.forEach(ride => {
+          const data = ride.data();
+          const div = document.createElement("div");
+          div.className = "detail-item";
+          div.innerHTML = `
+            <strong>${data.Pickup.name} ➝ ${data.Destination.name}</strong><br>
+            Distance: ${data.Distance.toFixed(2)} km, Fare: ₹${data.Fare}<br>
+            <button class="btn" onclick="acceptRide('${ride.id}')">Accept Ride</button>
+          `;
+          rideList.appendChild(div);
+        });
+      });
+    }
+
+    function listenMyRides() {
+      const myRidesQuery = query(collection(db, "Rides"), where("DriverId", "==", uid), where("Status", "==", "accepted"));
+      onSnapshot(myRidesQuery, snap => {
+        myRides = {};
+        snap.forEach(docSnap => {
+          myRides[docSnap.id] = docSnap.data();
+        });
+        renderMyRides();
+      });
+    }
+
+    function getDistance(lat1, lon1, lat2, lon2) {
+      const R = 6371; // km
+      const dLat = (lat2 - lat1) * Math.PI / 180;
+      const dLon = (lon2 - lon1) * Math.PI / 180;
+      const a = Math.sin(dLat/2) * Math.sin(dLat/2) +
+                Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) *
+                Math.sin(dLon/2) * Math.sin(dLon/2);
+      const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+      return R * c;
+    }
+
+    window.acceptRide = async function(rideId) {
+            if (!uid) return;
+
+      const rideRef = doc(db, "Rides", rideId);
+      const rideSnap = await getDoc(rideRef);
+      if (!rideSnap.exists()) {
+        alert("Ride no longer exists.");
+        return;
+      }
+      const rideData = rideSnap.data();
+
+      // Update Ride with Driver ID and Status
+      await updateDoc(rideRef, {
+        DriverId: uid,
+        Status: "accepted"
+      });
+
+      alert("Ride accepted! 🎉");
+
+      // Optionally: Send updated distance to student here if needed
+    };
+
+    window.declineRide = async function(rideId) {
+      if (!uid) return;
+      const rideRef = doc(db, "Rides", rideId);
+      await updateDoc(rideRef, {
+        DriverId: null,
+        Status: "requested"
+      });
+      alert("Ride declined.");
+    };
+
+    function startTrackingDriverLocation() {
+      if (!navigator.geolocation) {
+        alert("Geolocation is not supported by this browser.");
+        return;
+      }
+
+      const driverRef = doc(db, "drivers", uid);
+
+      navigator.geolocation.watchPosition(async (position) => {
+        const lat = position.coords.latitude;
+        const lng = position.coords.longitude;
+        const accuracy = position.coords.accuracy;
+
+        // Update driver's location in Firestore
+        await updateDoc(driverRef, {
+          location: {
+            lat: lat,
+            lng: lng,
+            accuracy: accuracy
+          },
+          lastUpdated: serverTimestamp()
+        });
+
+      }, (error) => {
+        console.error("Error getting location:", error.message);
+      }, {
+        enableHighAccuracy: true,
+        maximumAge: 0,
+        timeout: 10000
+      });
+    }
+  </script>
+</body>
+</html>
